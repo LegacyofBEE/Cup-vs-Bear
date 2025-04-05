@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bear vs Cat: Extreme Ping Pong</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #000; overflow: hidden; }
+    #backgroundVideo {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      object-fit: cover;
+      z-index: -1;
+    }
+    canvas {
+      display: block;
+      margin: 0 auto;
+      background: transparent;
+      z-index: 1;
+      position: relative;
+    }
+  </style>
+</head>
+<body>
+  <video id="backgroundVideo" autoplay muted loop playsinline>
+    <source src="https://pixeldrain.com/api/file/X6ovi5WL" type="video/mp4" />
+  </video>
+  <canvas id="gameCanvas" width="1000" height="600"></canvas>
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    const paddleWidth = 200, paddleHeight = 200;
+    const aiPaddleWidth = 320, aiPaddleHeight = 320;
+    const ballSize = 150;
+
+    let playerY = canvas.height / 2 - paddleHeight / 2;
+    let aiY = canvas.height / 2 - aiPaddleHeight / 2;
+    let ballX = canvas.width / 2 - ballSize / 2;
+    let ballY = canvas.height / 2 - ballSize / 2;
+    let ballSpeedX = 7, ballSpeedY = 5;
+
+    let playerScore = 0;
+    let aiScore = 0;
+    const maxScore = 6;
+    let gameOver = false;
+
+    let wPressed = false, sPressed = false;
+
+    const playerImg = new Image();
+    const aiImg = new Image();
+    const ballImg = new Image();
+
+    let assetsReady = false;
+    let loadError = "";
+
+    const loadAssets = async () => {
+      const loadImage = (src) => new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => {
+          loadError = `Failed to load image: ${src}`;
+          reject(new Error(loadError));
+        };
+        img.src = src;
+      });
+
+      try {
+        const [player, ai, ball] = await Promise.all([
+          loadImage("https://pixeldrain.com/api/file/anCL9cE1"),
+          loadImage("https://pixeldrain.com/api/file/8zS4gcno"),
+          loadImage("https://pixeldrain.com/api/file/tem7jq9Y")
+        ]);
+        playerImg.src = player.src;
+        aiImg.src = ai.src;
+        ballImg.src = ball.src;
+        assetsReady = true;
+        backgroundMusic.play();
+        gameLoop();
+      } catch (err) {
+        console.error(err.message);
+        drawDebugError();
+      }
+    };
+
+    const drawDebugError = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "red";
+      ctx.font = "20px Arial";
+      ctx.fillText(loadError || "Unknown error occurred.", 50, canvas.height / 2);
+    };
+
+    const audioFiles = [
+      new Audio("https://pixeldrain.com/api/file/WrqTbD8D"),
+      new Audio("https://pixeldrain.com/api/file/n2c2bEEH")
+    ];
+
+    const aiTaunts = [
+      new Audio("https://pixeldrain.com/api/file/u7Jkh5L5"),
+      new Audio("https://pixeldrain.com/api/file/1qSY7Fut"),
+      new Audio("https://pixeldrain.com/api/file/1utWVZ88"),
+      new Audio("https://pixeldrain.com/api/file/K4ByNMUR"),
+      new Audio("https://pixeldrain.com/api/file/k3Dxu32k"),
+      new Audio("https://pixeldrain.com/api/file/yhwCxeah"),
+      new Audio("https://pixeldrain.com/api/file/4CDQct4C"),
+      new Audio("https://pixeldrain.com/api/file/gejwXVr1")
+    ];
+
+    const backgroundMusic = new Audio("https://pixeldrain.com/api/file/WwN7PTBc");
+    backgroundMusic.loop = true;
+    backgroundMusic.volume = 0.5;
+    backgroundMusic.addEventListener('ended', () => {
+      backgroundMusic.currentTime = 0.5;
+      backgroundMusic.play();
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "w" || e.key === "W") wPressed = true;
+      if (e.key === "s" || e.key === "S") sPressed = true;
+    });
+    document.addEventListener("keyup", (e) => {
+      if (e.key === "w" || e.key === "W") wPressed = false;
+      if (e.key === "s" || e.key === "S") sPressed = false;
+    });
+
+    const drawCharacter = (img, x, y, width, height, flip = false) => {
+      if (!img.complete) return;
+      ctx.save();
+      if (flip) {
+        ctx.translate(x + width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(img, 0, y, width, height);
+      } else {
+        ctx.drawImage(img, x, y, width, height);
+      }
+      ctx.restore();
+    };
+
+    const drawBall = () => {
+      if (!ballImg.complete) return;
+      ctx.save();
+      ctx.shadowColor = 'rgba(255, 0, 255, 0.6)';
+      ctx.shadowBlur = 40;
+      ctx.drawImage(ballImg, ballX, ballY, ballSize, ballSize);
+      ctx.restore();
+    };
+
+    const drawHealthBars = () => {
+      ctx.fillStyle = "green";
+      ctx.fillRect(50, 70, playerScore * 20, 20);
+      ctx.fillStyle = "red";
+      ctx.fillRect(canvas.width - 50 - (aiScore * 20), 70, aiScore * 20, 20);
+    };
+
+    const drawScore = () => {
+      ctx.fillStyle = "#000";
+      ctx.font = "32px Arial";
+      ctx.fillText(`Player: ${playerScore}`, 50, 50);
+      ctx.fillText(`AI: ${aiScore}`, canvas.width - 150, 50);
+    };
+
+    const playRandomScoreAudio = () => {
+      const sound = audioFiles[Math.floor(Math.random() * audioFiles.length)];
+      sound.play();
+    };
+
+    const playRandomTaunt = () => {
+      const taunt = aiTaunts[Math.floor(Math.random() * aiTaunts.length)];
+      taunt.play();
+    };
+
+    const move = () => {
+      if (gameOver || !assetsReady) return;
+      if (wPressed && playerY > 0) playerY -= 8;
+      if (sPressed && playerY < canvas.height - paddleHeight) playerY += 8;
+      let aiCenter = aiY + aiPaddleHeight / 2;
+      if (aiCenter < ballY + ballSize / 2) aiY += 9;
+      else if (aiCenter > ballY + ballSize / 2) aiY -= 9;
+      ballX += ballSpeedX;
+      ballY += ballSpeedY;
+      if (ballY <= 0 || ballY + ballSize >= canvas.height) ballSpeedY *= -1;
+      if (ballX <= paddleWidth && ballY + ballSize > playerY && ballY < playerY + paddleHeight) {
+        ballSpeedX *= -1;
+        ballX = paddleWidth;
+      }
+      if (ballX + ballSize >= canvas.width - aiPaddleWidth && ballY + ballSize > aiY && ballY < aiY + aiPaddleHeight) {
+        ballSpeedX *= -1;
+        ballX = canvas.width - aiPaddleWidth - ballSize;
+      }
+      if (ballX < 0) {
+        aiScore++;
+        playRandomTaunt();
+        resetBall();
+      }
+      if (ballX > canvas.width) {
+        playerScore++;
+        playRandomScoreAudio();
+        resetBall();
+      }
+      if (playerScore >= maxScore || aiScore >= maxScore) {
+        gameOver = true;
+        backgroundMusic.pause();
+        alert(playerScore >= maxScore ? "You Win!" : "Moses Bear Wins!");
+      }
+    };
+
+    const resetBall = () => {
+      ballX = canvas.width / 2 - ballSize / 2;
+      ballY = canvas.height / 2 - ballSize / 2;
+      ballSpeedX = -ballSpeedX;
+    };
+
+    const draw = () => {
+      if (loadError) return drawDebugError();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawCharacter(playerImg, 0, playerY, paddleWidth, paddleHeight);
+      drawCharacter(aiImg, canvas.width - aiPaddleWidth, aiY, aiPaddleWidth, aiPaddleHeight, true);
+      drawBall();
+      drawScore();
+      drawHealthBars();
+    };
+
+    const gameLoop = () => {
+      move();
+      draw();
+      requestAnimationFrame(gameLoop);
+    };
+
+    loadAssets();
+  </script>
+</body>
+</html>
